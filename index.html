@@ -1,0 +1,33 @@
+
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <title>SL Live Tracker</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        body, html, #root { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+        .leaflet-container { height: 100%; width: 100%; background: #f0f0f0; }
+        .custom-popup .leaflet-popup-content-wrapper {
+            border-radius: 12px;
+            padding: 0;
+            overflow: hidden;
+        }
+        .custom-popup .leaflet-popup-content {
+            margin: 0;
+            width: 240px !important;
+        }
+        .stop-popup .leaflet-popup-content {
+            width: auto !important;
+            max-width: 240px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+</body>
+</html>

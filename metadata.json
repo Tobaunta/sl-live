@@ -1,0 +1,7 @@
+{
+  "name": "SL Live Tracker",
+  "description": "En avancerad realtidsapplikation för SL-trafiken som visar busslinjer, realtidspositioner och fordonsinformation direkt på kartan.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
