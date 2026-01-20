@@ -1,4 +1,3 @@
-
 {
   "name": "sl-live-tracker",
   "version": "1.0.0",
@@ -12,6 +11,7 @@
     "process-gtfs": "node scripts/process-gtfs.mjs"
   },
   "dependencies": {
+    "@vercel/analytics": "^1.6.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.562.0",
     "protobufjs": "^7.2.5",
