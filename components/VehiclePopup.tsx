@@ -8,11 +8,6 @@ interface VehiclePopupProps {
 }
 
 const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) => {
-  const destinationText = (vehicle.destination && vehicle.destination !== "Okänd")
-    ? `mot ${vehicle.destination}`
-    : '';
-  const lineText = `${lineShortName} ${destinationText}`.trim();
-
   // Extraherar operatörskod (de 3 siffrorna före de sista 4 i id:t)
   const match = /([0-9]{3})([0-9]{4})$/.exec(vehicle.id);
   const companyCode = match ? match[1] : null;
@@ -34,6 +29,7 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
 
   const vehicleNumber = vehicle.id.slice(-4);
   const roundedSpeed = Math.round(vehicle.speed);
+  const hasDestination = vehicle.destination && vehicle.destination !== "Okänd";
 
   // Formatera försening
   const getDelayInfo = () => {
@@ -55,10 +51,19 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
   const delayStatus = getDelayInfo();
 
   return (
-    <div className="p-3 bg-white min-w-[220px] text-gray-800 font-sans shadow-sm">
+    <div className="p-3 bg-white min-w-[240px] text-gray-800 font-sans shadow-sm">
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
         <div className="font-semibold text-gray-400 uppercase tracking-tighter">Linje</div>
-        <div className="text-right font-bold text-blue-600 truncate pr-5">{lineText}</div>
+        <div className="text-right font-bold text-blue-600 pr-5">{lineShortName}</div>
+
+        {hasDestination && (
+          <>
+            <div className="font-semibold text-gray-400 uppercase tracking-tighter">Destination</div>
+            <div className="text-right font-bold text-gray-800 break-words" title={vehicle.destination}>
+              {vehicle.destination}
+            </div>
+          </>
+        )}
 
         <div className="font-semibold text-gray-400 uppercase tracking-tighter">Punktlighet</div>
         <div className={`text-right font-bold ${delayStatus.color}`}>{delayStatus.text}</div>

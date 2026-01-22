@@ -1,4 +1,3 @@
-
 import path from 'path';
 import fs from 'fs';
 import yauzl from 'yauzl-promise';
@@ -73,6 +72,11 @@ async function processGTFS() {
         const slShapeIds = new Set();
         const tripsByRoute = new Map();
         const tripToRouteMap = {};
+        
+        // För att räkna ut vanligaste destinationen per riktning
+        // Struktur: { route_id: { direction_id: { headsign: count } } }
+        const routeDirectionStats = {};
+
         await streamCsvFromEntry(entries.get('trips.txt'), (row) => {
             if (slRouteIds.has(row.route_id)) {
                 slTripIds.add(row.trip_id);
@@ -81,15 +85,52 @@ async function processGTFS() {
                 if (!tripsByRoute.has(row.route_id)) tripsByRoute.set(row.route_id, []);
                 tripsByRoute.get(row.route_id).push(row);
                 
-                tripToRouteMap[row.trip_id] = row.route_id;
+                // SPARA BÅDE RUTE-ID OCH DESTINATION (HEADSIGN)
+                tripToRouteMap[row.trip_id] = {
+                    r: row.route_id,
+                    h: row.trip_headsign || ''
+                };
+
+                // Samla statistik för route-directions.json
+                const dir = row.direction_id; // '0' eller '1'
+                const headsign = row.trip_headsign;
+                if (dir !== undefined && dir !== '' && headsign) {
+                    if (!routeDirectionStats[row.route_id]) routeDirectionStats[row.route_id] = {};
+                    if (!routeDirectionStats[row.route_id][dir]) routeDirectionStats[row.route_id][dir] = {};
+                    
+                    const currentCount = routeDirectionStats[row.route_id][dir][headsign] || 0;
+                    routeDirectionStats[row.route_id][dir][headsign] = currentCount + 1;
+                }
             }
         }, 'trips.txt');
         console.log(` -> Hittade ${slTripIds.size} SL-resor med ${slShapeIds.size} unika former.`);
 
-        // Steg 3: Spara trip -> route mappningen
-        console.log('\n[3/7] Sparar trip-till-rutt-mappning...');
+        // Steg 3a: Spara trip -> route mappningen
+        console.log('\n[3/7] Sparar mappningsfiler...');
         fs.writeFileSync(path.join(OUT_DIR, 'trip-to-route.json'), JSON.stringify(tripToRouteMap));
-        console.log(` -> Sparade mappning till public/data/trip-to-route.json`);
+        
+        // Steg 3b: Skapa och spara route-directions.json (Fallback-data)
+        const routeDirections = {};
+        for (const [rId, dirs] of Object.entries(routeDirectionStats)) {
+            routeDirections[rId] = {};
+            for (const [dId, counts] of Object.entries(dirs)) {
+                // Hitta headsign med högst antal förekomster för denna riktning
+                let bestHeadsign = '';
+                let maxCount = 0;
+                for (const [h, countVal] of Object.entries(counts)) {
+                    const c = Number(countVal);
+                    if (c > maxCount) {
+                        maxCount = c;
+                        bestHeadsign = h;
+                    }
+                }
+                if (bestHeadsign) {
+                    routeDirections[rId][dId] = bestHeadsign;
+                }
+            }
+        }
+        fs.writeFileSync(path.join(OUT_DIR, 'route-directions.json'), JSON.stringify(routeDirections));
+        console.log(` -> Sparade trip-to-route.json och route-directions.json`);
 
 
         // Steg 4: Hitta alla hållplatstider och unika hållplatser

@@ -19,11 +19,32 @@ export interface LineManifestEntry {
     to: string;
 }
 
+interface TripMapEntry {
+  r: string; // route_id
+  h: string; // headsign
+}
+
+// Map: RouteID -> DirectionID -> Headsign
+interface RouteDirectionMap {
+    [routeId: string]: {
+        [directionId: string]: string;
+    }
+}
+
+interface TripUpdateInfo {
+    delay?: number;
+    directionId?: number;
+    routeId?: string;
+    lastStopId?: string;
+}
+
 class SLService {
   private db: IDBDatabase | null = null;
   private isInitialized = false;
   private rtRoot: any = null;
-  private tripToRouteMap: Record<string, string> | null = null;
+  private tripToRouteMap: Record<string, TripMapEntry> | null = null;
+  private routeDirections: RouteDirectionMap | null = null;
+  private stopsMap: Map<string, string> = new Map();
 
   public areKeysConfigured(): boolean {
     return true; 
@@ -57,10 +78,15 @@ class SLService {
     await this.getDB();
     const lastUpdate = localStorage.getItem(STATIC_TS_KEY);
     const now = Date.now();
+    
+    // Antingen ladda från filer eller från DB om vi har cache
     if (!lastUpdate || (now - parseInt(lastUpdate)) > CACHE_DURATION) {
       await this.loadStaticDataFromFiles();
+    } else {
+      await this.loadStopsFromDB();
     }
-    await this.loadTripToRouteMap();
+    
+    await this.loadAuxiliaryMaps();
     this.isInitialized = true;
   }
 
@@ -69,18 +95,39 @@ class SLService {
     return contentType && contentType.includes('application/json');
   }
 
-  private async loadTripToRouteMap() {
+  private async loadAuxiliaryMaps() {
     try {
-        const response = await fetch('/data/trip-to-route.json');
-        // Kontrollera både OK status och att det faktiskt är JSON (inte HTML fallback)
-        if (!response.ok || !this.isJson(response)) {
-            console.warn(`Trip-to-route map missing or invalid type (${response.status}). Realtime mapping might be incomplete.`);
-            return;
+        const [tripRes, dirRes] = await Promise.all([
+            fetch(`/data/trip-to-route.json?v=${Date.now()}`), 
+            fetch(`/data/route-directions.json?v=${Date.now()}`)
+        ]);
+
+        if (tripRes.ok && this.isJson(tripRes)) {
+            this.tripToRouteMap = await tripRes.json();
         }
-        this.tripToRouteMap = await response.json();
+
+        if (dirRes.ok && this.isJson(dirRes)) {
+            this.routeDirections = await dirRes.json();
+        }
     } catch(e) {
-        console.warn("Kunde inte ladda trip-till-rutt-mappning (ignorerar om filen saknas lokalt):", e);
+        console.warn("Kunde inte ladda hjälpkartor:", e);
     }
+  }
+
+  private async loadStopsFromDB() {
+      const db = await this.getDB();
+      return new Promise<void>((resolve) => {
+          const tx = db.transaction('stops', 'readonly');
+          const store = tx.objectStore('stops');
+          const req = store.getAll();
+          req.onsuccess = () => {
+              if (req.result) {
+                  req.result.forEach((s: SLStop) => this.stopsMap.set(s.id, s.name));
+              }
+              resolve();
+          };
+          req.onerror = () => resolve();
+      });
   }
 
   private async loadStaticDataFromFiles() {
@@ -90,14 +137,15 @@ class SLService {
         fetch('/data/stops.json')
       ]);
 
-      // Strikt kontroll: Måste vara 200 OK OCH vara JSON.
-      // Detta förhindrar krasch om Vite serverar index.html för saknade filer.
       if (!manifestRes.ok || !stopsRes.ok || !this.isJson(manifestRes) || !this.isJson(stopsRes)) {
-         throw new Error(`Static files missing or invalid format. Manifest: ${manifestRes.status}, Stops: ${stopsRes.status}`);
+         throw new Error(`Static files missing or invalid format.`);
       }
 
       const manifest = await manifestRes.json();
-      const stops = await stopsRes.json();
+      const stops: SLStop[] = await stopsRes.json();
+
+      // Uppdatera stopsMap i minnet
+      stops.forEach(s => this.stopsMap.set(s.id, s.name));
 
       const db = await this.getDB();
       const tx = db.transaction(['stops', 'routes'], 'readwrite');
@@ -117,7 +165,7 @@ class SLService {
       
       localStorage.setItem(STATIC_TS_KEY, Date.now().toString());
     } catch (e) {
-      console.warn("Varning: Kunde inte ladda statisk data. Detta är normalt om du inte kört 'npm run process-gtfs' än.", e);
+      console.warn("Varning: Kunde inte ladda statisk data.", e);
     }
   }
   
@@ -237,7 +285,9 @@ class SLService {
   }
 
   async getLiveVehicles(route?: SLLineRoute | null): Promise<SLVehicle[]> {
-    if (!route || !this.tripToRouteMap) return [];
+    if (!route) return [];
+    // Säkerställ att vi har data om det anropas innan init
+    if (!this.isInitialized) await this.initialize();
 
     try {
         const [posRes, updatesRes] = await Promise.all([
@@ -253,13 +303,12 @@ class SLService {
         const root = await this.getRTRoot();
         const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
         
-        // Dekoda fordonspositioner
         const posMessage = FeedMessage.decode(new Uint8Array(posBuffer));
         const posObject = FeedMessage.toObject(posMessage, { enums: String, longs: String });
         const posEntities = posObject.entity || [];
 
-        // Försök dekoda förseningar
-        const delaysMap: Map<string, number> = new Map();
+        const tripInfoMap: Map<string, TripUpdateInfo> = new Map();
+
         if (updatesRes && updatesRes.ok) {
             const updatesBuffer = await updatesRes.arrayBuffer();
             const updatesMessage = FeedMessage.decode(new Uint8Array(updatesBuffer));
@@ -269,14 +318,32 @@ class SLService {
             for (const e of updateEntities) {
                 if (e.tripUpdate && e.tripUpdate.trip) {
                     const tripId = e.tripUpdate.trip.tripId || e.tripUpdate.trip.trip_id;
-                    if (tripId && e.tripUpdate.stopTimeUpdate) {
-                        // Vi tar den senaste kända förseningen i resan
-                        const latestUpdate = e.tripUpdate.stopTimeUpdate[0];
-                        if (latestUpdate && latestUpdate.arrival && latestUpdate.arrival.delay !== undefined) {
-                            delaysMap.set(tripId, parseInt(latestUpdate.arrival.delay));
-                        } else if (latestUpdate && latestUpdate.departure && latestUpdate.departure.delay !== undefined) {
-                            delaysMap.set(tripId, parseInt(latestUpdate.departure.delay));
+                    const routeId = e.tripUpdate.trip.routeId || e.tripUpdate.trip.route_id;
+                    const directionId = e.tripUpdate.trip.directionId ?? e.tripUpdate.trip.direction_id;
+
+                    if (tripId) {
+                        let delay = undefined;
+                        let lastStopId = undefined;
+
+                        if (e.tripUpdate.stopTimeUpdate && e.tripUpdate.stopTimeUpdate.length > 0) {
+                            const updates = e.tripUpdate.stopTimeUpdate;
+                            // Hitta försening från första relevanta uppdatering
+                            const firstUpdate = updates[0];
+                            if (firstUpdate) {
+                                if (firstUpdate.arrival && firstUpdate.arrival.delay !== undefined) {
+                                    delay = parseInt(firstUpdate.arrival.delay);
+                                } else if (firstUpdate.departure && firstUpdate.departure.delay !== undefined) {
+                                    delay = parseInt(firstUpdate.departure.delay);
+                                }
+                            }
+                            
+                            // Hitta sista hållplats för destination
+                            const lastUpdate = updates[updates.length - 1];
+                            if (lastUpdate) {
+                                lastStopId = lastUpdate.stopId || lastUpdate.stop_id;
+                            }
                         }
+                        tripInfoMap.set(tripId, { delay, directionId, routeId, lastStopId });
                     }
                 }
             }
@@ -291,9 +358,40 @@ class SLService {
             if (!tripId) continue;
             
             let routeId = v.trip.routeId || v.trip.route_id;
-            if (!routeId) {
-                routeId = this.tripToRouteMap[tripId];
+            let directionId = v.trip.directionId ?? v.trip.direction_id;
+            
+            const info = tripInfoMap.get(tripId);
+            if (info) {
+                if (directionId === undefined || directionId === null) directionId = info.directionId;
+                if (!routeId) routeId = info.routeId;
             }
+
+            let headsign = "Okänd";
+
+            // STRATEGI 1: Direkt matchning på Trip ID
+            if (this.tripToRouteMap && this.tripToRouteMap[tripId]) {
+                const mapEntry = this.tripToRouteMap[tripId];
+                if (!routeId) routeId = mapEntry.r; 
+                if (mapEntry.h) headsign = mapEntry.h;
+            }
+
+            // STRATEGI 2: Fallback baserat på Rutt + Riktning
+            if ((!headsign || headsign === "Okänd") && routeId && directionId !== undefined && directionId !== null && this.routeDirections) {
+                const dirStr = String(directionId);
+                const fallbackHeadsign = this.routeDirections[routeId]?.[dirStr];
+                if (fallbackHeadsign) {
+                    headsign = fallbackHeadsign;
+                }
+            }
+
+            // STRATEGI 3: Fallback till sista hållplatsen i TripUpdate
+            if ((!headsign || headsign === "Okänd") && info?.lastStopId) {
+                const stopName = this.stopsMap.get(info.lastStopId);
+                if (stopName) {
+                    headsign = stopName;
+                }
+            }
+
             if (!routeId) continue;
 
             allVehicles.push({
@@ -306,9 +404,9 @@ class SLService {
                 lng: v.position.longitude,
                 bearing: v.position.bearing || 0,
                 speed: (v.position.speed || 0) * 3.6,
-                destination: "Okänd",
+                destination: headsign,
                 type: "Buss",
-                delay: delaysMap.get(tripId)
+                delay: info?.delay
             });
         }
 
@@ -338,7 +436,7 @@ class SLService {
       message TripUpdate { optional TripDescriptor trip = 1; repeated StopTimeUpdate stop_time_update = 2; }
       message StopTimeUpdate { optional uint32 stop_sequence = 1; optional string stop_id = 4; optional StopTimeEvent arrival = 2; optional StopTimeEvent departure = 3; }
       message StopTimeEvent { optional int32 delay = 1; optional int64 time = 2; optional int32 uncertainty = 3; }
-      message TripDescriptor { optional string trip_id = 1; optional string route_id = 5; }
+      message TripDescriptor { optional string trip_id = 1; optional string route_id = 5; optional uint32 direction_id = 6; }
       message VehicleDescriptor { optional string id = 1; optional string label = 2; optional string license_plate = 3; }
       message Position { required float latitude = 1; required float longitude = 2; optional float bearing = 3; optional float speed = 5; }
       message Alert {}
