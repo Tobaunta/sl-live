@@ -36,3 +36,9 @@ export interface SearchResult {
   title: string;
   subtitle?: string;
 }
+
+export interface HistoryPoint {
+  lat: number;
+  lng: number;
+  ts: number;
+}

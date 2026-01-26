@@ -1,3 +1,4 @@
+
 {
   "name": "sl-live-tracker",
   "version": "1.0.0",
@@ -14,7 +15,8 @@
     "@vercel/analytics": "^1.6.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.562.0",
-    "protobufjs": "^7.2.5",
+    "mongodb": "^6.13.0",
+    "protobufjs": "^7.4.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-leaflet": "^4.2.1"

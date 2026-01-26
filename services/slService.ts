@@ -1,5 +1,5 @@
 
-import { SLStop, SLLineRoute, SearchResult, SLVehicle } from '../types';
+import { SLStop, SLLineRoute, SearchResult, SLVehicle, HistoryPoint } from '../types';
 // @ts-ignore
 import protobuf from 'protobufjs';
 
@@ -284,6 +284,18 @@ class SLService {
       });
   }
 
+  async getVehicleHistory(tripId: string): Promise<HistoryPoint[]> {
+      try {
+          const res = await fetch(`/api/history?tripId=${tripId}`);
+          if (!res.ok) return [];
+          const data = await res.json();
+          return data.path || [];
+      } catch (e) {
+          console.error("Failed to fetch history", e);
+          return [];
+      }
+  }
+
   // Sök efter en specifik vagn globalt
   async findVehicle(vehicleNumber: string): Promise<{vehicle: SLVehicle, routeId: string} | null> {
       try {
@@ -308,20 +320,14 @@ class SLService {
 
           for (const e of posEntities) {
               const v = e.vehicle;
-              // SL-specifik logik: 
-              // 1. Kolla om 'label' matchar exakt.
-              // 2. Kolla om 'id' SLUTAR på söknumret (då ID ofta är '903100100010XXXX' där XXXX är vagnsnumret).
               if (v && v.vehicle) {
                   const label = v.vehicle.label ? String(v.vehicle.label).trim() : '';
                   const vid = v.vehicle.id ? String(v.vehicle.id).trim() : '';
                   
-                  // Vi matchar om etiketten är exakt ELLER om ID slutar med söksträngen
-                  // Detta hanterar både "4523" (input) -> "4523" (label) och "4523" (input) -> "...104523" (id)
                   if (label === target || (vid && vid.endsWith(target))) {
                        const tripId = v.trip?.tripId || v.trip?.trip_id;
                        let routeId = v.trip?.routeId || v.trip?.route_id;
 
-                       // Försök hitta routeId via trip map om det saknas och kartan är laddad
                        if (tripId && this.tripToRouteMap && this.tripToRouteMap[tripId]) {
                            routeId = this.tripToRouteMap[tripId].r;
                        }
@@ -333,7 +339,7 @@ class SLService {
                                    line: routeId,
                                    tripId: tripId || "",
                                    operator: "SL",
-                                   vehicleNumber: v.vehicle.label || vid.slice(-4), // Fallback för visning
+                                   vehicleNumber: v.vehicle.label || vid.slice(-4),
                                    lat: v.position.latitude,
                                    lng: v.position.longitude,
                                    bearing: v.position.bearing || 0,
@@ -355,9 +361,6 @@ class SLService {
   }
 
   async getLiveVehicles(route?: SLLineRoute | null): Promise<SLVehicle[]> {
-    // VIKTIGT: Vi tar bort spärren "if (!route) return []" för att tillåta global visning.
-    
-    // Säkerställ att vi har data om det anropas innan init
     if (!this.isInitialized) await this.initialize();
 
     try {
@@ -398,7 +401,6 @@ class SLService {
 
                         if (e.tripUpdate.stopTimeUpdate && e.tripUpdate.stopTimeUpdate.length > 0) {
                             const updates = e.tripUpdate.stopTimeUpdate;
-                            // Hitta försening från första relevanta uppdatering
                             const firstUpdate = updates[0];
                             if (firstUpdate) {
                                 if (firstUpdate.arrival && firstUpdate.arrival.delay !== undefined) {
@@ -408,7 +410,6 @@ class SLService {
                                 }
                             }
                             
-                            // Hitta sista hållplats för destination
                             const lastUpdate = updates[updates.length - 1];
                             if (lastUpdate) {
                                 lastStopId = lastUpdate.stopId || lastUpdate.stop_id;
@@ -439,14 +440,12 @@ class SLService {
 
             let headsign = "Okänd";
 
-            // STRATEGI 1: Direkt matchning på Trip ID
             if (this.tripToRouteMap && this.tripToRouteMap[tripId]) {
                 const mapEntry = this.tripToRouteMap[tripId];
                 if (!routeId) routeId = mapEntry.r; 
                 if (mapEntry.h) headsign = mapEntry.h;
             }
 
-            // STRATEGI 2: Fallback baserat på Rutt + Riktning
             if ((!headsign || headsign === "Okänd") && routeId && directionId !== undefined && directionId !== null && this.routeDirections) {
                 const dirStr = String(directionId);
                 const fallbackHeadsign = this.routeDirections[routeId]?.[dirStr];
@@ -455,7 +454,6 @@ class SLService {
                 }
             }
 
-            // STRATEGI 3: Fallback till sista hållplatsen i TripUpdate
             if ((!headsign || headsign === "Okänd") && info?.lastStopId) {
                 const stopName = this.stopsMap.get(info.lastStopId);
                 if (stopName) {
@@ -481,12 +479,10 @@ class SLService {
             });
         }
 
-        // Om ingen specifik rutt är vald, returnera ALLA fordon
         if (!route) {
             return allVehicles;
         }
 
-        // Annars filtrera baserat på vald rutt
         const tripIdSet = new Set(route.trip_ids);
         let filteredVehicles = allVehicles.filter(v => tripIdSet.has(v.tripId));
         

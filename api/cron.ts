@@ -1,0 +1,145 @@
+
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+// @ts-ignore
+import clientPromise from './_lib/mongodb.js';
+import protobuf from 'protobufjs';
+
+const API_ENDPOINT = 'https://opendata.samtrafiken.se/gtfs-rt-sweden/sl/VehiclePositionsSweden.pb';
+
+// Protobuf-definition
+const PROTO_DEF = `
+syntax = "proto2";
+package transit_realtime;
+message FeedMessage { required FeedHeader header = 1; repeated FeedEntity entity = 2; }
+message FeedHeader { required string gtfs_realtime_version = 1; optional Incrementality incrementality = 2 [default = FULL_DATASET]; optional uint64 timestamp = 3; enum Incrementality { FULL_DATASET = 0; DIFFERENTIAL = 1; } }
+message FeedEntity { required string id = 1; optional bool is_deleted = 2 [default = false]; optional TripUpdate trip_update = 3; optional VehiclePosition vehicle = 4; optional Alert alert = 5; }
+message VehiclePosition { optional TripDescriptor trip = 1; optional VehicleDescriptor vehicle = 8; optional Position position = 2; optional uint64 timestamp = 5; }
+message TripUpdate { optional TripDescriptor trip = 1; repeated StopTimeUpdate stop_time_update = 2; }
+message StopTimeUpdate { optional uint32 stop_sequence = 1; optional string stop_id = 4; optional StopTimeEvent arrival = 2; optional StopTimeEvent departure = 3; }
+message StopTimeEvent { optional int32 delay = 1; optional int64 time = 2; optional int32 uncertainty = 3; }
+message TripDescriptor { optional string trip_id = 1; optional string route_id = 5; optional uint32 direction_id = 6; }
+message VehicleDescriptor { optional string id = 1; optional string label = 2; optional string license_plate = 3; }
+message Position { required float latitude = 1; required float longitude = 2; optional float bearing = 3; optional float speed = 5; }
+message Alert {}
+`;
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const authHeader = req.headers['authorization'];
+  const queryKey = req.query.key;
+  
+  // Enkel säkerhetskoll (hoppas över om CRON_SECRET inte är satt i env)
+  if (process.env.CRON_SECRET) {
+      if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && queryKey !== process.env.CRON_SECRET) {
+          return res.status(401).json({ error: 'Unauthorized' });
+      }
+  }
+
+  const apiKey = process.env.RT_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'RT_API_KEY is missing' });
+  }
+
+  try {
+    const response = await fetch(`${API_ENDPOINT}?key=${apiKey}`);
+    if (!response.ok) throw new Error(`Upstream API failed: ${response.status}`);
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const root = protobuf.parse(PROTO_DEF).root;
+    const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
+    const message = FeedMessage.decode(new Uint8Array(arrayBuffer));
+    
+    const object = FeedMessage.toObject(message, { 
+        enums: String, 
+        longs: String, 
+        defaults: true 
+    });
+    
+    const entities = object.entity || [];
+    
+    if (entities.length === 0) {
+        return res.status(200).json({ message: "API ok, but 0 entities returned" });
+    }
+
+    const now = Date.now();
+    // Ändrat till 2 timmar retention (2 * 60 * 60 * 1000)
+    const expireTime = new Date(now + 2 * 60 * 60 * 1000); 
+
+    let debugLog: any[] = [];
+
+    const validVehicles = entities
+        .map((e: any, index: number) => {
+            if (!e.vehicle || !e.vehicle.trip) return null;
+            
+            const trip = e.vehicle.trip;
+            const tripId = trip.tripId || trip.trip_id;
+            const routeId = trip.routeId || trip.route_id;
+            
+            // Logga de första 3 misslyckade för att se varför
+            if (!tripId && debugLog.length < 3) {
+                debugLog.push({ index, reason: "Missing tripId", raw: trip });
+            }
+
+            if (!tripId) return null;
+
+            return {
+                tripId: tripId,
+                line: routeId, 
+                vehicleId: e.vehicle.vehicle?.id || e.id,
+                lat: e.vehicle.position?.latitude,
+                lng: e.vehicle.position?.longitude,
+                ts: now
+            };
+        })
+        .filter((v: any) => v !== null && v.lat !== undefined && v.lng !== undefined);
+
+    if (validVehicles.length === 0) {
+        return res.status(200).json({ 
+            message: "No valid vehicles found to save.",
+            total_entities: entities.length,
+            debug_failures: debugLog
+        });
+    }
+
+    const client = await clientPromise;
+    const db = client.db("sl_tracker");
+    const collection = db.collection("vehicle_trails");
+
+    await collection.createIndex({ tripId: 1 }, { unique: true });
+    await collection.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 }); 
+
+    const ops = validVehicles.map((v: any) => ({
+        updateOne: {
+          filter: { tripId: v.tripId },
+          update: {
+            $set: {
+              line: v.line,
+              vehicleId: v.vehicleId,
+              expireAt: expireTime,
+              lastUpdate: now
+            },
+            $push: {
+              trail: {
+                lat: v.lat,
+                lng: v.lng,
+                ts: now
+              }
+            }
+          },
+          upsert: true
+        }
+    }));
+
+    const result = await collection.bulkWrite(ops as any[], { ordered: false });
+
+    return res.status(200).json({ 
+        success: true, 
+        saved: ops.length, 
+        modified: result.modifiedCount,
+        upserted: result.upsertedCount 
+    });
+
+  } catch (error: any) {
+    console.error("CRON Error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+}
