@@ -22,7 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const buffer = await apiResponse.arrayBuffer();
     res.setHeader('Content-Type', 'application/x-protobuf');
-    res.setHeader('Cache-Control', 's-maxage=5, stale-while-revalidate=5');
+    res.setHeader('Cache-Control', 's-maxage=1, stale-while-revalidate=1');
     
     return res.status(200).send(Buffer.from(buffer));
     

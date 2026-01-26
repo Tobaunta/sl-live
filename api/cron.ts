@@ -126,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Configuration for Pro Plan
   const TOTAL_RUN_TIME_MS = 58000; // Stop just before the next minute starts (58s)
-  const INTERVAL_MS = 10000; // Target interval: 10 seconds
+  const INTERVAL_MS = 5000; // Target interval: 5 seconds (Updated from 10s)
   const startTime = Date.now();
 
   try {
@@ -153,8 +153,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Calculate time spent processing
         const workDuration = Date.now() - loopStart;
         
-        // Calculate needed sleep to maintain 10s interval
-        // If work took 2s, we sleep 8s. If work took 12s, we sleep 0s.
+        // Calculate needed sleep to maintain target interval
+        // If work took 1s, sleep 4s (if interval is 5s)
         const sleepTime = Math.max(0, INTERVAL_MS - workDuration);
 
         // Check if sleeping would push us over the total limit

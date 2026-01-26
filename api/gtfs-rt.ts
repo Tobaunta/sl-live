@@ -30,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Skicka tillbaka den binära Protobuf-datan till klienten
     res.setHeader('Content-Type', 'application/x-protobuf');
-    res.setHeader('Cache-Control', 's-maxage=5, stale-while-revalidate=5'); // Cachea i 5s
+    res.setHeader('Cache-Control', 's-maxage=1, stale-while-revalidate=1'); 
     
     return res.status(200).send(Buffer.from(buffer));
     

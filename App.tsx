@@ -209,7 +209,7 @@ const App: React.FC = () => {
     };
 
     fetchLive();
-    const interval = setInterval(fetchLive, 10000); // 10s per önskemål
+    const interval = setInterval(fetchLive, 2500); 
     return () => clearInterval(interval);
   }, [loading, isApiConfigured]);
 
