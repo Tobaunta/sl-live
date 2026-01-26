@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bus, MapPin, X } from 'lucide-react';
+import { Search, Bus, MapPin, X, Train, Ship, TramFront, TrainFront } from 'lucide-react';
 import { slService } from '../services/slService';
 import { SearchResult, SLLineRoute, HistoryPoint } from '../types';
 
@@ -13,6 +13,47 @@ interface SearchBarProps {
   placeholder?: string;
   historyPath?: HistoryPoint[];
 }
+
+const getTransportIcon = (lineString: string) => {
+  // Extrahera linjenummer från titeln "Linje X"
+  const lineName = lineString.replace('Linje ', '').trim();
+
+  // Om linjen innehåller bokstäver (t.ex. 25M), visa alltid buss
+  if (/[a-zA-Z]/.test(lineName)) {
+    return <Bus className="w-5 h-5 text-blue-400" />;
+  }
+
+  const num = parseInt(lineName);
+  if (isNaN(num)) return <Bus className="w-5 h-5 text-blue-400" />;
+
+  // Tunnelbana (10, 11, 13, 14, 17, 18, 19)
+  if ([10, 11, 13, 14, 17, 18, 19].includes(num)) {
+    return <TrainFront className="w-5 h-5 text-blue-400" />;
+  }
+
+  // Spårvagn (7, 30, 31) + Nockebybanan (12)
+  if ([7, 12, 30, 31].includes(num)) {
+    return <TramFront className="w-5 h-5 text-blue-400" />;
+  }
+
+  // Lokalbana (21, 25, 26, 27, 28, 29)
+  if ([21, 25, 26, 27, 28, 29].includes(num)) {
+    return <TramFront className="w-5 h-5 text-blue-400" />;
+  }
+
+  // Pendeltåg (40, 41, 42, 43, 44, 48)
+  if ([40, 41, 42, 43, 44, 48].includes(num)) {
+    return <Train className="w-5 h-5 text-blue-400" />;
+  }
+
+  // Pendelbåt (80, 82, 83, 84, 89)
+  if ([80, 82, 83, 84, 89].includes(num)) {
+    return <Ship className="w-5 h-5 text-blue-400" />;
+  }
+
+  // Standard: Buss
+  return <Bus className="w-5 h-5 text-blue-400" />;
+};
 
 const SearchBar: React.FC<SearchBarProps> = ({ 
   onSelect, 
@@ -107,7 +148,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
               >
                 <div className={`p-2 rounded-lg ${result.type === 'line' ? 'bg-blue-500/20' : 'bg-emerald-500/20'}`}>
                   {result.type === 'line' ? (
-                    <Bus className="w-5 h-5 text-blue-400" />
+                    getTransportIcon(result.title)
                   ) : (
                     <MapPin className="w-5 h-5 text-emerald-400" />
                   )}
