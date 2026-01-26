@@ -23,23 +23,8 @@ message Position { required float latitude = 1; required float longitude = 2; op
 message Alert {}
 `;
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const authHeader = req.headers['authorization'];
-  const queryKey = req.query.key;
-  
-  // Enkel säkerhetskoll (hoppas över om CRON_SECRET inte är satt i env)
-  if (process.env.CRON_SECRET) {
-      if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && queryKey !== process.env.CRON_SECRET) {
-          return res.status(401).json({ error: 'Unauthorized' });
-      }
-  }
-
-  const apiKey = process.env.RT_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'RT_API_KEY is missing' });
-  }
-
-  try {
+// Helper function to fetch and save data once
+async function fetchAndSaveData(apiKey: string, db: any) {
     const response = await fetch(`${API_ENDPOINT}?key=${apiKey}`);
     if (!response.ok) throw new Error(`Upstream API failed: ${response.status}`);
     
@@ -57,27 +42,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const entities = object.entity || [];
     
     if (entities.length === 0) {
-        return res.status(200).json({ message: "API ok, but 0 entities returned" });
+        return { saved: 0, message: "0 entities returned" };
     }
 
     const now = Date.now();
-    // Ändrat till 2 timmar retention (2 * 60 * 60 * 1000)
     const expireTime = new Date(now + 2 * 60 * 60 * 1000); 
 
-    let debugLog: any[] = [];
-
     const validVehicles = entities
-        .map((e: any, index: number) => {
+        .map((e: any) => {
             if (!e.vehicle || !e.vehicle.trip) return null;
-            
             const trip = e.vehicle.trip;
             const tripId = trip.tripId || trip.trip_id;
             const routeId = trip.routeId || trip.route_id;
-            
-            // Logga de första 3 misslyckade för att se varför
-            if (!tripId && debugLog.length < 3) {
-                debugLog.push({ index, reason: "Missing tripId", raw: trip });
-            }
 
             if (!tripId) return null;
 
@@ -93,17 +69,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .filter((v: any) => v !== null && v.lat !== undefined && v.lng !== undefined);
 
     if (validVehicles.length === 0) {
-        return res.status(200).json({ 
-            message: "No valid vehicles found to save.",
-            total_entities: entities.length,
-            debug_failures: debugLog
-        });
+        return { saved: 0, message: "No valid vehicles found" };
     }
 
-    const client = await clientPromise;
-    const db = client.db("sl_tracker");
     const collection = db.collection("vehicle_trails");
-
+    
+    // Ensure indexes exist (doing this every loop is cheap if they exist)
     await collection.createIndex({ tripId: 1 }, { unique: true });
     await collection.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 }); 
 
@@ -131,15 +102,80 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const result = await collection.bulkWrite(ops as any[], { ordered: false });
 
-    return res.status(200).json({ 
-        success: true, 
+    return { 
         saved: ops.length, 
         modified: result.modifiedCount,
         upserted: result.upsertedCount 
+    };
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const authHeader = req.headers['authorization'];
+  const queryKey = req.query.key;
+  
+  if (process.env.CRON_SECRET) {
+      if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && queryKey !== process.env.CRON_SECRET) {
+          return res.status(401).json({ error: 'Unauthorized' });
+      }
+  }
+
+  const apiKey = process.env.RT_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'RT_API_KEY is missing' });
+  }
+
+  // Configuration for Pro Plan
+  const TOTAL_RUN_TIME_MS = 58000; // Stop just before the next minute starts (58s)
+  const INTERVAL_MS = 10000; // Target interval: 10 seconds
+  const startTime = Date.now();
+
+  try {
+    const client = await clientPromise;
+    const db = client.db("sl_tracker");
+    
+    const results = [];
+    let iterations = 0;
+
+    // Loop logic to fill the minute
+    while ((Date.now() - startTime) < TOTAL_RUN_TIME_MS) {
+        const loopStart = Date.now();
+        iterations++;
+
+        try {
+            console.log(`Cron iteration ${iterations} starting at ${new Date().toISOString()}`);
+            const result = await fetchAndSaveData(apiKey, db);
+            results.push({ iteration: iterations, timestamp: Date.now(), ...result });
+        } catch (err: any) {
+            console.error(`Error in iteration ${iterations}:`, err);
+            results.push({ iteration: iterations, error: err.message });
+        }
+
+        // Calculate time spent processing
+        const workDuration = Date.now() - loopStart;
+        
+        // Calculate needed sleep to maintain 10s interval
+        // If work took 2s, we sleep 8s. If work took 12s, we sleep 0s.
+        const sleepTime = Math.max(0, INTERVAL_MS - workDuration);
+
+        // Check if sleeping would push us over the total limit
+        if ((Date.now() - startTime) + sleepTime >= TOTAL_RUN_TIME_MS) {
+            break;
+        }
+
+        if (sleepTime > 0) {
+            await new Promise(resolve => setTimeout(resolve, sleepTime));
+        }
+    }
+
+    return res.status(200).json({ 
+        success: true, 
+        iterations,
+        total_time_ms: Date.now() - startTime,
+        details: results 
     });
 
   } catch (error: any) {
-    console.error("CRON Error:", error);
+    console.error("CRON Fatal Error:", error);
     return res.status(500).json({ error: error.message });
   }
 }

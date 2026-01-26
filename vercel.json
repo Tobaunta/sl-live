@@ -8,5 +8,10 @@
       "path": "/api/cron",
       "schedule": "* * * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/cron.ts": {
+      "maxDuration": 300
+    }
+  }
 }
