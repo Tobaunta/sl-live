@@ -382,51 +382,55 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <div className="absolute bottom-6 left-6 z-[1000] flex flex-col gap-3 pointer-events-auto">
-        <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl flex flex-col gap-3 min-w-[240px]">
-          <div className="flex items-center gap-4">
-             <div className={`w-3 h-3 rounded-full flex-shrink-0 ${liveStatus === 'ok' ? 'bg-emerald-500 animate-pulse' : (liveStatus === 'error' ? 'bg-red-500' : 'bg-yellow-500')}`}></div>
-             <div>
-               <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Live Status</div>
-               <div className="text-sm font-semibold text-white">{getStatusText()}</div>
-             </div>
-          </div>
-          
-          <div className="h-px w-full bg-white/10"></div>
-          
-          {/* Toggle for Visa alla bussar */}
-          <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-300">Visa alla bussar</span>
-              <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                      type="checkbox" 
-                      checked={showAllVehicles} 
-                      onChange={(e) => setShowAllVehicles(e.target.checked)} 
-                      className="sr-only peer" 
-                  />
-                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
-          </div>
+      {/* Responsive Bottom Container */}
+      <div className="absolute bottom-4 left-0 right-0 z-[1000] px-4 pointer-events-none flex flex-col gap-4 md:bottom-6 md:px-6 md:flex-row md:items-end md:justify-between">
+        
+        {/* Live Status Panel */}
+        <div className="pointer-events-auto w-full md:w-auto flex flex-col gap-3">
+          <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl flex flex-col gap-3 w-full md:min-w-[240px]">
+            <div className="flex items-center gap-4">
+               <div className={`w-3 h-3 rounded-full flex-shrink-0 ${liveStatus === 'ok' ? 'bg-emerald-500 animate-pulse' : (liveStatus === 'error' ? 'bg-red-500' : 'bg-yellow-500')}`}></div>
+               <div>
+                 <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Live Status</div>
+                 <div className="text-sm font-semibold text-white">{getStatusText()}</div>
+               </div>
+            </div>
+            
+            <div className="h-px w-full bg-white/10"></div>
+            
+            <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-300">Visa alla bussar</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                        type="checkbox" 
+                        checked={showAllVehicles} 
+                        onChange={(e) => setShowAllVehicles(e.target.checked)} 
+                        className="sr-only peer" 
+                    />
+                    <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
 
-          {/* Toggle for Visa historik */}
-          <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-300">Visa historik</span>
-              <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                      type="checkbox" 
-                      checked={showHistory} 
-                      onChange={(e) => setShowHistory(e.target.checked)} 
-                      className="sr-only peer" 
-                  />
-                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
+            <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-300">Visa historik</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                        type="checkbox" 
+                        checked={showHistory} 
+                        onChange={(e) => setShowHistory(e.target.checked)} 
+                        className="sr-only peer" 
+                    />
+                    <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
           </div>
-
         </div>
-      </div>
 
-      <div className="absolute bottom-6 right-6 z-[1000] pointer-events-auto flex flex-col items-end gap-2">
-         <VehicleSearch onVehicleFound={handleVehicleFound} />
+        {/* Vehicle Search Box */}
+        <div className="pointer-events-auto w-full md:w-auto flex flex-col items-end gap-2">
+           <VehicleSearch onVehicleFound={handleVehicleFound} />
+        </div>
+
       </div>
 
       <MapContainer center={mapConfig.center} zoom={mapConfig.zoom} zoomControl={false} className="w-full h-full">
