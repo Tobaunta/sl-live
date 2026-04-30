@@ -215,7 +215,7 @@ const App: React.FC = () => {
       setVehicles(v);
     };
     fetchData();
-    const i = setInterval(fetchData, 3000);
+    const i = setInterval(fetchData, 5000);
     return () => clearInterval(i);
   }, [loading, agency]);
 
@@ -515,12 +515,14 @@ const App: React.FC = () => {
             
             return (
             <React.Fragment key={route.id}>
+                {route.path && route.path.length > 0 && (
                 <Polyline 
-                    positions={route.path} 
+                    positions={route.path.filter(p => p && typeof p[0] === 'number' && typeof p[1] === 'number') as [number, number][]} 
                     color={standardColor} 
                     weight={6} 
                     opacity={0.6} 
                 />
+                )}
                 {route.stops.map(s => {
                     const passage = stopPassages.get(s.id);
                     let markerFill = "#ffffff";
@@ -579,7 +581,7 @@ const App: React.FC = () => {
         
         {history.length > 1 && (
             <Polyline 
-                positions={history.map(p => [p.lat, p.lng])} 
+                positions={history.filter(p => p && typeof p.lat === 'number' && typeof p.lng === 'number').map(p => [p.lat, p.lng] as [number, number])} 
                 color="#ef4444" 
                 weight={3} 
                 dashArray="5, 10" 

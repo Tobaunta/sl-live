@@ -41,6 +41,8 @@ class SLService {
   private stopsMap: Map<string, string> = new Map();
   private manifest: LineManifestEntry[] = [];
   private contractorMap: Map<string, string> = new Map();
+  private cachedTripUpdatesBuffer: ArrayBuffer | null = null;
+  private lastTripUpdatesFetchTime: number = 0;
 
   public areKeysConfigured(): boolean { return true; }
 
@@ -201,16 +203,24 @@ class SLService {
   async getLiveVehicles(currentAgency?: 'SL' | 'WAAB'): Promise<SLVehicle[]> {
     await this.initialize();
     try {
-        // Hämta både positioner och förseningar parallellt
-        const [posRes, updatesRes] = await Promise.all([
-          fetch(RT_VEHICLE_URL),
-          fetch(RT_TRIP_UPDATES_URL)
-        ]);
+        const now = Date.now();
+        const shouldFetchUpdates = !this.cachedTripUpdatesBuffer || (now - this.lastTripUpdatesFetchTime > 30000);
 
-        const [posBuffer, updatesBuffer] = await Promise.all([
-          posRes.arrayBuffer(),
-          updatesRes.arrayBuffer()
-        ]);
+        let posResPromise = fetch(RT_VEHICLE_URL);
+        let updatesResPromise = shouldFetchUpdates ? fetch(RT_TRIP_UPDATES_URL) : Promise.resolve(null);
+
+        const [posRes, updatesRes] = await Promise.all([posResPromise, updatesResPromise]);
+
+        const posBuffer = await posRes.arrayBuffer();
+        
+        let updatesBuffer: ArrayBuffer;
+        if (shouldFetchUpdates && updatesRes) {
+            updatesBuffer = await updatesRes.arrayBuffer();
+            this.cachedTripUpdatesBuffer = updatesBuffer;
+            this.lastTripUpdatesFetchTime = now;
+        } else {
+            updatesBuffer = this.cachedTripUpdatesBuffer!;
+        }
 
         const root = await this.getRTRoot();
         const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
